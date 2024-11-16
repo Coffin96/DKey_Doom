@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Emoji Doom - Maze</title>
+    <style>
+        body { 
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+        }
+        #gameCanvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            cursor: crosshair;
+        }
+        #hud {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            color: red;
+            font-family: monospace;
+            font-size: 24px;
+            text-shadow: 2px 2px 2px black;
+        }
+        #crosshair {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: red;
+            font-size: 24px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="crosshair">+</div>
+    <div id="hud">❤️ 100 💥 0</div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const hud = document.getElementById('hud');
+
+        // Встановлюємо розмір canvas
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Генерація лабіринту
+        function generateMaze(width, height) {
+            const maze = Array(height).fill().map(() => Array(width).fill(1));
+            
+            function carve(x, y) {
+                maze[y][x] = 0;
+                const directions = [[0,-2], [2,0], [0,2], [-2,0]];
+                for(let i = directions.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [directions[i], directions[j]] = [directions[j], directions[i]];
+                }
+                
+                for(const [dx, dy] of directions) {
+                    const newX = x + dx;
+                    const newY = y + dy;
+                    if(newX > 0 && newX < width-1 && newY > 0 && newY < height-1 && maze[newY][newX] === 1) {
+                        maze[y + dy/2][x + dx/2] = 0;
+                        carve(newX, newY);
+                    }
+                }
+            }
+            
+            carve(1, 1);
+            return maze;
+        }
+
+        // Ігровий стан
+        const state = {
+            player: {
+                x: 1.5,
+                y: 1.5,
+                angle: 0,
+                health: 100,
+                kills: 0
+            },
+            map: generateMaze(15, 15),
+            enemies: [
+                {x: 3, y: 3, emoji: '👻', alive: true},
+                {x: 5, y: 5, emoji: '👾', alive: true},
+                {x: 7, y: 7, emoji: '🤖', alive: true},
+            ],
+            fov: Math.PI / 3,
+            moveSpeed: 0.05,
+            rotateSpeed: 0.03
+        };
+
+        // Керування
+        const keys = {};
+        document.addEventListener('keydown', (e) => keys[e.key] = true);
+        document.addEventListener('keyup', (e) => keys[e.key] = false);
+
+        function movePlayer() {
+            if (keys['ArrowUp'] || keys['w']) {
+                const newX = state.player.x + Math.cos(state.player.angle) * state.moveSpeed;
+                const newY = state.player.y + Math.sin(state.player.angle) * state.moveSpeed;
+                if (state.map[Math.floor(newY)][Math.floor(newX)] === 0) {
+                    state.player.x = newX;
+                    state.player.y = newY;
+                }
+            }
+            if (keys['ArrowDown'] || keys['s']) {
+                const newX = state.player.x - Math.cos(state.player.angle) * state.moveSpeed;
+                const newY = state.player.y - Math.sin(state.player.angle) * state.moveSpeed;
+                if (state.map[Math.floor(newY)][Math.floor(newX)] === 0) {
+                    state.player.x = newX;
+                    state.player.y = newY;
+                }
+            }
+            if (keys['ArrowLeft'] || keys['a']) {
+                state.player.angle -= state.rotateSpeed;
+            }
+            if (keys['ArrowRight'] || keys['d']) {
+                state.player.angle += state.rotateSpeed;
+            }
+        }
+
+        function castRay(rayAngle) {
+            let rayX = state.player.x;
+            let rayY = state.player.y;
+            let distance = 0;
+            const rayStepSize = 0.1;
+
+            while (distance < 20) {
+                rayX += Math.cos(rayAngle) * rayStepSize;
+                rayY += Math.sin(rayAngle) * rayStepSize;
+                distance += rayStepSize;
+
+                const mapX = Math.floor(rayX);
+                const mapY = Math.floor(rayY);
+
+                if (mapY < 0 || mapX < 0 || mapY >= state.map.length || mapX >= state.map[0].length || state.map[mapY][mapX] === 1) {
+                    return {
+                        distance,
+                        type: 'wall'
+                    };
+                }
+
+                for (let enemy of state.enemies) {
+                    if (!enemy.alive) continue;
+                    const dx = rayX - enemy.x;
+                    const dy = rayY - enemy.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < 0.5) {
+                        return {
+                            distance,
+                            type: 'enemy',
+                            enemy
+                        };
+                    }
+                }
+            }
+            return {
+                distance: Infinity,
+                type: 'none'
+            };
+        }
+
+        function render() {
+            // Очищаємо екран
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Малюємо небо
+            ctx.fillStyle = '#444';
+            ctx.fillRect(0, 0, canvas.width, canvas.height/2);
+
+            // Малюємо підлогу
+            ctx.fillStyle = '#222';
+            ctx.fillRect(0, canvas.height/2, canvas.width, canvas.height/2);
+
+            const rayCount = Math.floor(canvas.width / 2);  // Зменшили кількість променів для оптимізації
+            const rayStep = state.fov / rayCount;
+
+            for (let i = 0; i < rayCount; i++) {
+                const rayAngle = state.player.angle - state.fov/2 + rayStep * i;
+                const ray = castRay(rayAngle);
+
+                if (ray.type !== 'none') {
+                    const wallHeight = (canvas.height / ray.distance) / 2;
+                    const wallTop = (canvas.height - wallHeight) / 2;
+
+                    // Малюємо стіну або ворога
+                    if (ray.type === 'wall') {
+                        const brightness = Math.max(255 - ray.distance * 25, 50);
+                        ctx.fillStyle = `rgb(0, ${brightness}, 0)`;
+                        ctx.fillRect(i * 2, wallTop, 2, wallHeight); // Малюємо ширші лінії
+                    } else if (ray.type === 'enemy') {
+                        const fontSize = Math.min(wallHeight, 100);
+                        ctx.font = `${fontSize}px Arial`;
+                        ctx.fillStyle = 'white';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(ray.enemy.emoji, i * 2, wallTop + wallHeight/2);
+                    }
+                }
+            }
+
+            // Оновлюємо HUD
+            hud.textContent = `❤️ ${state.player.health} 💥 ${state.player.kills}`;
+        }
+
+        function shoot() {
+            const ray = castRay(state.player.angle);
+            if (ray.type === 'enemy' && ray.distance < 8) {
+                ray.enemy.alive = false;
+                state.player.kills++;
+            }
+        }
+
+        // Обробка стрільби
+        canvas.addEventListener('click', shoot);
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                shoot();
+            }
+            // Генерація нового рівня на R
+            if (e.code === 'KeyR') {
+                state.map = generateMaze(15, 15);
+                state.player.x = 1.5;
+                state.player.y = 1.5;
+                state.player.angle = 0;
+                state.enemies = [
+                    {x: 3, y: 3, emoji: '👻', alive: true},
+                    {x: 5, y: 5, emoji: '👾', alive: true},
+                    {x: 7, y: 7, emoji: '🤖', alive: true},
+                ];
+            }
+        });
+
+        // Ігровий цикл
+        function gameLoop() {
+            movePlayer();
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+
+        gameLoop();
+    </script>
+</body>
+</html>
